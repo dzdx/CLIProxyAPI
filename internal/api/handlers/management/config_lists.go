@@ -734,6 +734,177 @@ func (h *Handler) DeleteVertexCompatKey(c *gin.Context) {
 	c.JSON(400, gin.H{"error": "missing api-key or index"})
 }
 
+// modelhub-api-key: []ModelHubKey
+func (h *Handler) GetModelHubKeys(c *gin.Context) {
+	c.JSON(200, gin.H{"modelhub-api-key": h.modelHubKeysWithAuthIndex()})
+}
+func (h *Handler) PutModelHubKeys(c *gin.Context) {
+	data, err := c.GetRawData()
+	if err != nil {
+		c.JSON(400, gin.H{"error": "failed to read body"})
+		return
+	}
+	var arr []config.ModelHubKey
+	if err = json.Unmarshal(data, &arr); err != nil {
+		var obj struct {
+			Items []config.ModelHubKey `json:"items"`
+		}
+		if err2 := json.Unmarshal(data, &obj); err2 != nil || len(obj.Items) == 0 {
+			c.JSON(400, gin.H{"error": "invalid body"})
+			return
+		}
+		arr = obj.Items
+	}
+	for i := range arr {
+		normalizeModelHubKey(&arr[i])
+		if arr[i].APIKey == "" {
+			c.JSON(400, gin.H{"error": fmt.Sprintf("modelhub-api-key[%d].api-key is required", i)})
+			return
+		}
+	}
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.cfg.ModelHubAPIKey = append([]config.ModelHubKey(nil), arr...)
+	h.cfg.SanitizeModelHubKeys()
+	h.persistLocked(c)
+}
+func (h *Handler) PatchModelHubKey(c *gin.Context) {
+	type modelHubPatch struct {
+		APIKey         *string                 `json:"api-key"`
+		Prefix         *string                 `json:"prefix"`
+		BaseURL        *string                 `json:"base-url"`
+		ProxyURL       *string                 `json:"proxy-url"`
+		Headers        *map[string]string      `json:"headers"`
+		Models         *[]config.ModelHubModel `json:"models"`
+		ExcludedModels *[]string               `json:"excluded-models"`
+	}
+	var body struct {
+		Index *int           `json:"index"`
+		Match *string        `json:"match"`
+		Value *modelHubPatch `json:"value"`
+	}
+	if errBindJSON := c.ShouldBindJSON(&body); errBindJSON != nil || body.Value == nil {
+		c.JSON(400, gin.H{"error": "invalid body"})
+		return
+	}
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	targetIndex := -1
+	if body.Index != nil && *body.Index >= 0 && *body.Index < len(h.cfg.ModelHubAPIKey) {
+		targetIndex = *body.Index
+	}
+	if targetIndex == -1 && body.Match != nil {
+		match := strings.TrimSpace(*body.Match)
+		if match != "" {
+			for i := range h.cfg.ModelHubAPIKey {
+				if h.cfg.ModelHubAPIKey[i].APIKey == match {
+					targetIndex = i
+					break
+				}
+			}
+		}
+	}
+	if targetIndex == -1 {
+		c.JSON(404, gin.H{"error": "item not found"})
+		return
+	}
+
+	entry := h.cfg.ModelHubAPIKey[targetIndex]
+	if body.Value.APIKey != nil {
+		trimmed := strings.TrimSpace(*body.Value.APIKey)
+		if trimmed == "" {
+			h.cfg.ModelHubAPIKey = append(h.cfg.ModelHubAPIKey[:targetIndex], h.cfg.ModelHubAPIKey[targetIndex+1:]...)
+			h.cfg.SanitizeModelHubKeys()
+			h.persistLocked(c)
+			return
+		}
+		entry.APIKey = trimmed
+	}
+	if body.Value.Prefix != nil {
+		entry.Prefix = strings.TrimSpace(*body.Value.Prefix)
+	}
+	if body.Value.BaseURL != nil {
+		trimmed := strings.TrimSpace(*body.Value.BaseURL)
+		if trimmed == "" {
+			h.cfg.ModelHubAPIKey = append(h.cfg.ModelHubAPIKey[:targetIndex], h.cfg.ModelHubAPIKey[targetIndex+1:]...)
+			h.cfg.SanitizeModelHubKeys()
+			h.persistLocked(c)
+			return
+		}
+		entry.BaseURL = trimmed
+	}
+	if body.Value.ProxyURL != nil {
+		entry.ProxyURL = strings.TrimSpace(*body.Value.ProxyURL)
+	}
+	if body.Value.Headers != nil {
+		entry.Headers = config.NormalizeHeaders(*body.Value.Headers)
+	}
+	if body.Value.Models != nil {
+		entry.Models = append([]config.ModelHubModel(nil), (*body.Value.Models)...)
+	}
+	if body.Value.ExcludedModels != nil {
+		entry.ExcludedModels = config.NormalizeExcludedModels(*body.Value.ExcludedModels)
+	}
+	normalizeModelHubKey(&entry)
+	h.cfg.ModelHubAPIKey[targetIndex] = entry
+	h.cfg.SanitizeModelHubKeys()
+	h.persistLocked(c)
+}
+
+func (h *Handler) DeleteModelHubKey(c *gin.Context) {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if val := strings.TrimSpace(c.Query("api-key")); val != "" {
+		if baseRaw, okBase := c.GetQuery("base-url"); okBase {
+			base := strings.TrimSpace(baseRaw)
+			out := make([]config.ModelHubKey, 0, len(h.cfg.ModelHubAPIKey))
+			for _, v := range h.cfg.ModelHubAPIKey {
+				if strings.TrimSpace(v.APIKey) == val && strings.TrimSpace(v.BaseURL) == base {
+					continue
+				}
+				out = append(out, v)
+			}
+			h.cfg.ModelHubAPIKey = out
+			h.cfg.SanitizeModelHubKeys()
+			h.persistLocked(c)
+			return
+		}
+
+		matchIndex := -1
+		matchCount := 0
+		for i := range h.cfg.ModelHubAPIKey {
+			if strings.TrimSpace(h.cfg.ModelHubAPIKey[i].APIKey) == val {
+				matchCount++
+				if matchIndex == -1 {
+					matchIndex = i
+				}
+			}
+		}
+		if matchCount > 1 {
+			c.JSON(400, gin.H{"error": "multiple items match api-key; base-url is required"})
+			return
+		}
+		if matchIndex != -1 {
+			h.cfg.ModelHubAPIKey = append(h.cfg.ModelHubAPIKey[:matchIndex], h.cfg.ModelHubAPIKey[matchIndex+1:]...)
+		}
+		h.cfg.SanitizeModelHubKeys()
+		h.persistLocked(c)
+		return
+	}
+	if idxStr := c.Query("index"); idxStr != "" {
+		var idx int
+		_, errScan := fmt.Sscanf(idxStr, "%d", &idx)
+		if errScan == nil && idx >= 0 && idx < len(h.cfg.ModelHubAPIKey) {
+			h.cfg.ModelHubAPIKey = append(h.cfg.ModelHubAPIKey[:idx], h.cfg.ModelHubAPIKey[idx+1:]...)
+			h.cfg.SanitizeModelHubKeys()
+			h.persistLocked(c)
+			return
+		}
+	}
+	c.JSON(400, gin.H{"error": "missing api-key or index"})
+}
+
 // oauth-excluded-models: map[string][]string
 func (h *Handler) GetOAuthExcludedModels(c *gin.Context) {
 	c.JSON(200, gin.H{"oauth-excluded-models": config.NormalizeOAuthExcludedModels(h.cfg.OAuthExcludedModels)})
@@ -1184,6 +1355,32 @@ func normalizeVertexCompatKey(entry *config.VertexCompatKey) {
 		model.Name = strings.TrimSpace(model.Name)
 		model.Alias = strings.TrimSpace(model.Alias)
 		if model.Name == "" || model.Alias == "" {
+			continue
+		}
+		normalized = append(normalized, model)
+	}
+	entry.Models = normalized
+}
+
+func normalizeModelHubKey(entry *config.ModelHubKey) {
+	if entry == nil {
+		return
+	}
+	entry.APIKey = strings.TrimSpace(entry.APIKey)
+	entry.Prefix = strings.TrimSpace(entry.Prefix)
+	entry.BaseURL = strings.TrimSpace(entry.BaseURL)
+	entry.ProxyURL = strings.TrimSpace(entry.ProxyURL)
+	entry.Headers = config.NormalizeHeaders(entry.Headers)
+	entry.ExcludedModels = config.NormalizeExcludedModels(entry.ExcludedModels)
+	if len(entry.Models) == 0 {
+		return
+	}
+	normalized := make([]config.ModelHubModel, 0, len(entry.Models))
+	for i := range entry.Models {
+		model := entry.Models[i]
+		model.Name = strings.TrimSpace(model.Name)
+		model.Alias = strings.TrimSpace(model.Alias)
+		if model.Name == "" {
 			continue
 		}
 		normalized = append(normalized, model)

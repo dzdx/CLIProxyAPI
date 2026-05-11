@@ -57,6 +57,9 @@ type APIKeyClientResult struct {
 	// VertexCompatKeyCount is the number of Vertex-compatible API keys loaded
 	VertexCompatKeyCount int
 
+	// ModelHubKeyCount is the number of ModelHub API keys loaded
+	ModelHubKeyCount int
+
 	// ClaudeKeyCount is the number of Claude API keys loaded
 	ClaudeKeyCount int
 

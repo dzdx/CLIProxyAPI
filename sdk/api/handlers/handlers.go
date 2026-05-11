@@ -188,6 +188,17 @@ func StreamingBootstrapRetries(cfg *config.SDKConfig) int {
 	return retries
 }
 
+func StreamingFirstByteTimeout(cfg *config.SDKConfig) time.Duration {
+	if cfg == nil {
+		return 0
+	}
+	seconds := cfg.Streaming.FirstByteTimeoutSeconds
+	if seconds <= 0 {
+		return 0
+	}
+	return time.Duration(seconds) * time.Second
+}
+
 // PassthroughHeadersEnabled returns whether upstream response headers should be forwarded to clients.
 // Default is false.
 func PassthroughHeadersEnabled(cfg *config.SDKConfig) bool {
@@ -640,6 +651,9 @@ func (h *BaseAPIHandler) ExecuteStreamWithAuthManager(ctx context.Context, handl
 	}
 	reqMeta := requestExecutionMetadata(ctx)
 	reqMeta[coreexecutor.RequestedModelMetadataKey] = modelName
+	if timeout := StreamingFirstByteTimeout(h.Cfg); timeout > 0 {
+		reqMeta[coreexecutor.StreamBootstrapTimeoutMetadataKey] = timeout
+	}
 	payload := rawJSON
 	if len(payload) == 0 {
 		payload = nil

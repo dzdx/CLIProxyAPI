@@ -143,6 +143,37 @@ func TestDeleteVertexCompatKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
 	}
 }
 
+func TestDeleteModelHubKey_DeletesOnlyMatchingBaseURL(t *testing.T) {
+	t.Parallel()
+	gin.SetMode(gin.TestMode)
+
+	h := &Handler{
+		cfg: &config.Config{
+			ModelHubAPIKey: []config.ModelHubKey{
+				{APIKey: "shared-key", BaseURL: "https://a.example.com/crawl"},
+				{APIKey: "shared-key", BaseURL: "https://b.example.com/crawl"},
+			},
+		},
+		configFilePath: writeTestConfigFile(t),
+	}
+
+	rec := httptest.NewRecorder()
+	c, _ := gin.CreateTestContext(rec)
+	c.Request = httptest.NewRequest(http.MethodDelete, "/v0/management/modelhub-api-key?api-key=shared-key&base-url=https://b.example.com/crawl", nil)
+
+	h.DeleteModelHubKey(c)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d; body=%s", rec.Code, http.StatusOK, rec.Body.String())
+	}
+	if got := len(h.cfg.ModelHubAPIKey); got != 1 {
+		t.Fatalf("modelhub keys len = %d, want 1", got)
+	}
+	if got := h.cfg.ModelHubAPIKey[0].BaseURL; got != "https://a.example.com/crawl" {
+		t.Fatalf("remaining base-url = %q, want %q", got, "https://a.example.com/crawl")
+	}
+}
+
 func TestDeleteCodexKey_RequiresBaseURLWhenAPIKeyDuplicated(t *testing.T) {
 	t.Parallel()
 	gin.SetMode(gin.TestMode)

@@ -28,6 +28,11 @@ type vertexCompatKeyWithAuthIndex struct {
 	AuthIndex string `json:"auth-index,omitempty"`
 }
 
+type modelHubKeyWithAuthIndex struct {
+	config.ModelHubKey
+	AuthIndex string `json:"auth-index,omitempty"`
+}
+
 type openAICompatibilityAPIKeyWithAuthIndex struct {
 	config.OpenAICompatibilityAPIKey
 	AuthIndex string `json:"auth-index,omitempty"`
@@ -238,6 +243,32 @@ func (h *Handler) openAICompatibilityWithAuthIndex() []openAICompatibilityWithAu
 			}
 		}
 		out[i] = response
+	}
+	return out
+}
+
+func (h *Handler) modelHubKeysWithAuthIndex() []modelHubKeyWithAuthIndex {
+	if h == nil {
+		return nil
+	}
+	liveIndexByID := h.liveAuthIndexByID()
+
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	if h.cfg == nil {
+		return nil
+	}
+
+	idGen := synthesizer.NewStableIDGenerator()
+	out := make([]modelHubKeyWithAuthIndex, len(h.cfg.ModelHubAPIKey))
+	for i := range h.cfg.ModelHubAPIKey {
+		entry := h.cfg.ModelHubAPIKey[i]
+		id, _ := idGen.Next("modelhub:apikey", entry.APIKey, entry.BaseURL, entry.ProxyURL)
+		authIndex := liveIndexByID[id]
+		out[i] = modelHubKeyWithAuthIndex{
+			ModelHubKey: entry,
+			AuthIndex:   authIndex,
+		}
 	}
 	return out
 }

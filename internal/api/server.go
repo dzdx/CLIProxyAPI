@@ -631,6 +631,9 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.GET("/max-retry-interval", s.mgmt.GetMaxRetryInterval)
 		mgmt.PUT("/max-retry-interval", s.mgmt.PutMaxRetryInterval)
 		mgmt.PATCH("/max-retry-interval", s.mgmt.PutMaxRetryInterval)
+		mgmt.GET("/streaming/first-byte-timeout-seconds", s.mgmt.GetStreamingFirstByteTimeout)
+		mgmt.PUT("/streaming/first-byte-timeout-seconds", s.mgmt.PutStreamingFirstByteTimeout)
+		mgmt.PATCH("/streaming/first-byte-timeout-seconds", s.mgmt.PutStreamingFirstByteTimeout)
 
 		mgmt.GET("/force-model-prefix", s.mgmt.GetForceModelPrefix)
 		mgmt.PUT("/force-model-prefix", s.mgmt.PutForceModelPrefix)
@@ -659,6 +662,11 @@ func (s *Server) registerManagementRoutes() {
 		mgmt.PUT("/vertex-api-key", s.mgmt.PutVertexCompatKeys)
 		mgmt.PATCH("/vertex-api-key", s.mgmt.PatchVertexCompatKey)
 		mgmt.DELETE("/vertex-api-key", s.mgmt.DeleteVertexCompatKey)
+
+		mgmt.GET("/modelhub-api-key", s.mgmt.GetModelHubKeys)
+		mgmt.PUT("/modelhub-api-key", s.mgmt.PutModelHubKeys)
+		mgmt.PATCH("/modelhub-api-key", s.mgmt.PatchModelHubKey)
+		mgmt.DELETE("/modelhub-api-key", s.mgmt.DeleteModelHubKey)
 
 		mgmt.GET("/oauth-excluded-models", s.mgmt.GetOAuthExcludedModels)
 		mgmt.PUT("/oauth-excluded-models", s.mgmt.PutOAuthExcludedModels)

@@ -26,6 +26,8 @@ const (
 	SelectedAuthCallbackMetadataKey = "selected_auth_callback"
 	// ExecutionSessionMetadataKey identifies a long-lived downstream execution session.
 	ExecutionSessionMetadataKey = "execution_session_id"
+	// StreamBootstrapTimeoutMetadataKey carries a per-request timeout used while waiting for the first stream payload.
+	StreamBootstrapTimeoutMetadataKey = "stream_bootstrap_timeout"
 )
 
 // Request encapsulates the translated payload that will be sent to a provider executor.

@@ -470,6 +470,52 @@ func TestConfigSynthesizer_VertexCompat_SkipsEmptyAndHeaders(t *testing.T) {
 	}
 }
 
+func TestConfigSynthesizer_ModelHub(t *testing.T) {
+	synth := NewConfigSynthesizer()
+	ctx := &SynthesisContext{
+		Config: &config.Config{
+			ModelHubAPIKey: []config.ModelHubKey{
+				{
+					APIKey:  "modelhub-key-123",
+					BaseURL: "https://aidp.aaaaaa.net/api/modelhub/online/v2/crawl",
+					Prefix:  "modelhub-prod",
+					Headers: map[string]string{"X-TT-LOGID": "trace-id"},
+					Models: []config.ModelHubModel{
+						{Name: "ali-deepseek-v4-pro", Alias: "deepseek-pro"},
+					},
+				},
+			},
+		},
+		Now:         time.Now(),
+		IDGenerator: NewStableIDGenerator(),
+	}
+
+	auths, err := synth.Synthesize(ctx)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(auths) != 1 {
+		t.Fatalf("expected 1 auth, got %d", len(auths))
+	}
+
+	auth := auths[0]
+	if auth.Provider != "modelhub" {
+		t.Fatalf("expected provider modelhub, got %s", auth.Provider)
+	}
+	if auth.Label != "modelhub-apikey" {
+		t.Fatalf("expected label modelhub-apikey, got %s", auth.Label)
+	}
+	if auth.Prefix != "modelhub-prod" {
+		t.Fatalf("expected prefix modelhub-prod, got %s", auth.Prefix)
+	}
+	if got := auth.Attributes["header:X-TT-LOGID"]; got != "trace-id" {
+		t.Fatalf("expected header:X-TT-LOGID=trace-id, got %s", got)
+	}
+	if got := auth.Attributes["models_hash"]; got == "" {
+		t.Fatal("expected models_hash to be set")
+	}
+}
+
 func TestConfigSynthesizer_OpenAICompat_WithModelsHash(t *testing.T) {
 	synth := NewConfigSynthesizer()
 	ctx := &SynthesisContext{

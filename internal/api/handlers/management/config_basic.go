@@ -271,6 +271,19 @@ func (h *Handler) PutMaxRetryInterval(c *gin.Context) {
 	h.updateIntField(c, func(v int) { h.cfg.MaxRetryInterval = v })
 }
 
+// Streaming first byte timeout
+func (h *Handler) GetStreamingFirstByteTimeout(c *gin.Context) {
+	c.JSON(200, gin.H{"first-byte-timeout-seconds": h.cfg.Streaming.FirstByteTimeoutSeconds})
+}
+func (h *Handler) PutStreamingFirstByteTimeout(c *gin.Context) {
+	h.updateIntField(c, func(v int) {
+		if v < 0 {
+			v = 0
+		}
+		h.cfg.Streaming.FirstByteTimeoutSeconds = v
+	})
+}
+
 // ForceModelPrefix
 func (h *Handler) GetForceModelPrefix(c *gin.Context) {
 	c.JSON(200, gin.H{"force-model-prefix": h.cfg.ForceModelPrefix})

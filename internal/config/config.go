@@ -129,6 +129,9 @@ type Config struct {
 	// Used for services that use Vertex AI-style paths but with simple API key authentication.
 	VertexCompatAPIKey []VertexCompatKey `yaml:"vertex-api-key" json:"vertex-api-key"`
 
+	// ModelHubAPIKey defines ModelHub API key configurations for OpenAI-compatible payload transport.
+	ModelHubAPIKey []ModelHubKey `yaml:"modelhub-api-key" json:"modelhub-api-key"`
+
 	// AmpCode contains Amp CLI upstream configuration, management restrictions, and model mappings.
 	AmpCode AmpCode `yaml:"ampcode" json:"ampcode"`
 
@@ -703,6 +706,9 @@ func LoadConfigOptional(configFile string, optional bool) (*Config, error) {
 
 	// Sanitize Vertex-compatible API keys.
 	cfg.SanitizeVertexCompatKeys()
+
+	// Sanitize ModelHub API keys.
+	cfg.SanitizeModelHubKeys()
 
 	// Sanitize Codex keys: drop entries without base-url
 	cfg.SanitizeCodexKeys()

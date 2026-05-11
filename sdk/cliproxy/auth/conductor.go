@@ -860,13 +860,16 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		return nil, &Error{Code: "executor_not_found", Message: "executor not registered"}
 	}
 	ctx = contextWithRequestedModelAlias(ctx, opts, routeModel)
+	bootstrapTimeout := streamBootstrapTimeout(opts)
 	var lastErr error
 	for idx, execModel := range execModels {
 		resultModel := m.stateModelForExecution(auth, routeModel, execModel, pooled)
 		execReq := req
 		execReq.Model = execModel
-		streamResult, errStream := executor.ExecuteStream(ctx, auth, execReq, opts)
+		bootstrapCtx, stopBootstrapTimer := withStreamBootstrapTimeout(ctx, bootstrapTimeout)
+		streamResult, errStream := executor.ExecuteStream(bootstrapCtx, auth, execReq, opts)
 		if errStream != nil {
+			stopBootstrapTimer()
 			if errCtx := ctx.Err(); errCtx != nil {
 				return nil, errCtx
 			}
@@ -884,11 +887,15 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			continue
 		}
 
-		buffered, closed, bootstrapErr := readStreamBootstrap(ctx, streamResult.Chunks)
+		buffered, closed, bootstrapErr := readStreamBootstrap(bootstrapCtx, streamResult.Chunks)
 		if bootstrapErr != nil {
+			stopBootstrapTimer()
 			if errCtx := ctx.Err(); errCtx != nil {
 				discardStreamChunks(streamResult.Chunks)
 				return nil, errCtx
+			}
+			if bootstrapTimeout > 0 && bootstrapCtx.Err() != nil {
+				bootstrapErr = &Error{Code: "stream_bootstrap_timeout", Message: "timed out waiting for first stream payload", Retryable: true, HTTPStatus: http.StatusRequestTimeout}
 			}
 			if isRequestInvalidError(bootstrapErr) {
 				rerr := &Error{Message: bootstrapErr.Error()}
@@ -925,6 +932,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 		}
 
 		if closed && len(buffered) == 0 {
+			stopBootstrapTimer()
 			emptyErr := &Error{Code: "empty_stream", Message: "upstream stream closed before first payload", Retryable: true}
 			result := Result{AuthID: auth.ID, Provider: provider, Model: resultModel, Success: false, Error: emptyErr}
 			m.MarkResult(ctx, result)
@@ -935,6 +943,7 @@ func (m *Manager) executeStreamWithModelPool(ctx context.Context, executor Provi
 			return nil, newStreamBootstrapError(emptyErr, streamResult.Headers)
 		}
 
+		stopBootstrapTimer()
 		remaining := streamResult.Chunks
 		if closed {
 			closedCh := make(chan cliproxyexecutor.StreamChunk)
@@ -1557,6 +1566,32 @@ func (m *Manager) executeStreamMixedOnce(ctx context.Context, providers []string
 	}
 }
 
+func withStreamBootstrapTimeout(ctx context.Context, timeout time.Duration) (context.Context, func()) {
+	if ctx == nil || timeout <= 0 {
+		return ctx, func() {}
+	}
+	child, cancel := context.WithCancel(ctx)
+	timer := time.AfterFunc(timeout, cancel)
+	return child, func() {
+		timer.Stop()
+	}
+}
+
+func streamBootstrapTimeout(opts cliproxyexecutor.Options) time.Duration {
+	if len(opts.Metadata) == 0 {
+		return 0
+	}
+	raw, ok := opts.Metadata[cliproxyexecutor.StreamBootstrapTimeoutMetadataKey]
+	if !ok {
+		return 0
+	}
+	timeout, ok := raw.(time.Duration)
+	if !ok || timeout <= 0 {
+		return 0
+	}
+	return timeout
+}
+
 func ensureRequestedModelMetadata(opts cliproxyexecutor.Options, requestedModel string) cliproxyexecutor.Options {
 	requestedModel = strings.TrimSpace(requestedModel)
 	if requestedModel == "" {
@@ -1777,6 +1812,8 @@ func (m *Manager) applyAPIKeyModelAlias(auth *Auth, requestedModel string) strin
 		upstreamModel = resolveUpstreamModelForCodexAPIKey(cfg, auth, requestedModel)
 	case "vertex":
 		upstreamModel = resolveUpstreamModelForVertexAPIKey(cfg, auth, requestedModel)
+	case "modelhub":
+		upstreamModel = resolveUpstreamModelForModelHubAPIKey(cfg, auth, requestedModel)
 	default:
 		upstreamModel = resolveUpstreamModelForOpenAICompatAPIKey(cfg, auth, requestedModel)
 	}
@@ -1887,6 +1924,21 @@ func resolveUpstreamModelForCodexAPIKey(cfg *internalconfig.Config, auth *Auth, 
 
 func resolveUpstreamModelForVertexAPIKey(cfg *internalconfig.Config, auth *Auth, requestedModel string) string {
 	entry := resolveVertexAPIKeyConfig(cfg, auth)
+	if entry == nil {
+		return ""
+	}
+	return resolveModelAliasFromConfigModels(requestedModel, asModelAliasEntries(entry.Models))
+}
+
+func resolveModelHubAPIKeyConfig(cfg *internalconfig.Config, auth *Auth) *internalconfig.ModelHubKey {
+	if cfg == nil {
+		return nil
+	}
+	return resolveAPIKeyConfig(cfg.ModelHubAPIKey, auth)
+}
+
+func resolveUpstreamModelForModelHubAPIKey(cfg *internalconfig.Config, auth *Auth, requestedModel string) string {
+	entry := resolveModelHubAPIKeyConfig(cfg, auth)
 	if entry == nil {
 		return ""
 	}
